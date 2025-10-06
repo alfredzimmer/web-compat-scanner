@@ -102,14 +102,14 @@ class WebCompatibilityScanner {
 
   async scanDirectory() {
     const spinner = ora('Scanning project for web features...').start();
-    
+
     try {
       // Scan HTML files
       const htmlFiles = await glob('**/*.{html,htm}', { cwd: this.targetDir, nodir: true });
-      
+
       // Scan CSS files
       const cssFiles = await glob('**/*.css', { cwd: this.targetDir, nodir: true });
-      
+
       // Scan JavaScript files
       const jsFiles = await glob('**/*.{js,jsx,ts,tsx}', { cwd: this.targetDir, nodir: true });
 
@@ -134,7 +134,7 @@ class WebCompatibilityScanner {
           ...cssFiles.slice(i, i + BATCH_SIZE),
           ...jsFiles.slice(i, i + BATCH_SIZE)
         ];
-        
+
         await Promise.all(batch.map(processFile));
         spinner.text = `Scanned ${Math.min(i + BATCH_SIZE, totalFiles)}/${totalFiles} files...`;
       }
@@ -158,6 +158,50 @@ class WebCompatibilityScanner {
       spinner.text = 'Analyzing fetched content...';
       // Use the URL as a pseudo filePath for context in locations
       this.analyzeContent(content, url);
+
+      // Attempt to fetch linked CSS and JS assets (simple, non-exhaustive crawler)
+      // This helps detect features that are present in external styles/scripts
+      try {
+        const assetUrls = new Set();
+
+        // Find linked stylesheets: <link rel="stylesheet" href="...">
+        for (const match of content.matchAll(/<link[^>]+rel\s*=\s*["']stylesheet["'][^>]*href\s*=\s*["']([^"']+)["']/ig)) {
+          if (match[1]) assetUrls.add(new URL(match[1], url).toString());
+        }
+
+        // Find script src attributes: <script src="...">
+        for (const match of content.matchAll(/<script[^>]+src\s*=\s*["']([^"']+)["']/ig)) {
+          if (match[1]) assetUrls.add(new URL(match[1], url).toString());
+        }
+
+        // Also find <style>...</style> blocks already covered by analyzeContent
+
+        if (assetUrls.size > 0) {
+          spinner.text = `Fetching ${assetUrls.size} linked assets...`;
+          const MAX_CONCURRENT = 6;
+          const urls = Array.from(assetUrls);
+          for (let i = 0; i < urls.length; i += MAX_CONCURRENT) {
+            const batch = urls.slice(i, i + MAX_CONCURRENT);
+            await Promise.all(batch.map(async (asset) => {
+              try {
+                const r = await fetch(asset);
+                if (!r.ok) return;
+                const text = await r.text();
+                // Analyze the asset content and pass the asset URL as the filePath
+                this.analyzeContent(text, asset);
+              } catch (e) {
+                // Non-fatal: continue with other assets
+                // eslint-disable-next-line no-console
+                console.error(`Failed to fetch asset ${asset}: ${e.message}`);
+              }
+            }));
+          }
+        }
+      } catch (e) {
+        // Non-fatal: asset fetching should not break the main scan
+        // eslint-disable-next-line no-console
+        console.error('Asset fetching failed:', e.message);
+      }
       spinner.succeed('URL scanned');
       return this.generateReport();
     } catch (error) {
@@ -169,13 +213,24 @@ class WebCompatibilityScanner {
   analyzeContent(content, filePath) {
     // Simple pattern matching for demonstration
     // In a real implementation, this would use proper parsing
-    const ext = path.extname(filePath).toLowerCase();
-    
+    // Normalize extension detection for URLs by using the pathname when possible
+    let ext = '';
+    try {
+      if (typeof filePath === 'string' && /^https?:\/\//i.test(filePath)) {
+        const u = new URL(filePath);
+        ext = path.extname(u.pathname).toLowerCase();
+      } else {
+        ext = path.extname(filePath).toLowerCase();
+      }
+    } catch (e) {
+      ext = path.extname(filePath).toLowerCase();
+    }
+
     // Check for CSS Grid
     if (content.includes('display: grid') || content.includes('display:grid')) {
       this.recordFeature('css-grid', filePath);
     }
-    
+
     // Check for Flexbox
     if (content.includes('display: flex') || content.includes('display:flex')) {
       this.recordFeature('flexbox', filePath);
@@ -228,7 +283,7 @@ class WebCompatibilityScanner {
         this.recordFeature('js-es-modules', filePath);
       }
     }
-    
+
     // Add more feature detections as needed
   }
 
@@ -240,7 +295,7 @@ class WebCompatibilityScanner {
         count: 0
       });
     }
-    
+
     const feature = this.featureSupport.get(featureId);
     feature.count += 1;
     if (feature.locations.length < 10) { // Limit the number of locations to keep the report manageable
@@ -285,7 +340,7 @@ class WebCompatibilityScanner {
     const ext = (format === 'markdown' || format === 'md') ? 'md' : format;
     const filename = `compatibility-report-${timestamp}.${ext}`;
     const filepath = path.join(this.targetDir, filename);
-    
+
     let content;
     if (format === 'json') {
       content = JSON.stringify(report, null, 2);
@@ -297,7 +352,7 @@ class WebCompatibilityScanner {
     } else {
       throw new Error(`Unsupported format: ${format}. Use 'json', 'yaml', or 'md'.`);
     }
-    
+
     await fs.writeFile(filepath, content, 'utf-8');
     return filepath;
   }
