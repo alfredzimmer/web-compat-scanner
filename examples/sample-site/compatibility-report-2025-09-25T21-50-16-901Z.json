@@ -1,0 +1,36 @@
+{
+  "timestamp": "2025-09-25T21:50:16.887Z",
+  "project": "sample-site",
+  "features": [
+    {
+      "id": "flexbox",
+      "name": "CSS Flexible Box Layout",
+      "status": "baseline",
+      "since": "2012",
+      "browsers": {
+        "chrome": "29",
+        "firefox": "28",
+        "safari": "9",
+        "edge": "12"
+      },
+      "locations": [
+        "styles.css"
+      ]
+    },
+    {
+      "id": "css-grid",
+      "name": "CSS Grid Layout",
+      "status": "baseline",
+      "since": "2017",
+      "browsers": {
+        "chrome": "57",
+        "firefox": "52",
+        "safari": "10.1",
+        "edge": "16"
+      },
+      "locations": [
+        "styles.css"
+      ]
+    }
+  ]
+}
